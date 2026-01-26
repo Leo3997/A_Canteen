@@ -1,0 +1,13 @@
+path: E:/实习相关/杭州得鹿山/食物视觉识别/标准框多菜品识别/Synthetic_Dataset
+train: train/images
+val: test/images
+test: test/images
+nc: 7
+names:
+  0: rice
+  1: mantou
+  2: ouhe
+  3: qingjiaochaorou
+  4: shuizhuroupian
+  5: tudoudunniurou
+  6: yuxiangrousi

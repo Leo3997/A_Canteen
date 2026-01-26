@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy
+python-multipart
+ultralytics
+torch
+torchvision
+opencv-python
+segment-anything
+matplotlib
+pillow

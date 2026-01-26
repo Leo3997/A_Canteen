@@ -1,0 +1,44 @@
+# Python 环境
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node.js
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# 数据库
+*.db
+*.sqlite3
+
+# IDE 配置文件
+.vscode/
+.idea/
+
+# 项目特定：静态资源与大模型文件
+static/uploads/
+static/results/
+*.png
+*.jpg
+*.jpeg
+*.pth
+*.pt
+*.onnx
+*.weights
+*.h5
+
+# 明确列出已知的超大文件 (>100MB)
+sam_vit_b.pth
+
+# 忽略日志文件
+*.log
+
+# Windows 系统文件
+Thumbs.db
+ehthumbs.db
+Desktop.ini
