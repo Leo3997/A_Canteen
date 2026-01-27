@@ -77,6 +77,24 @@ def get_laplacian_variance(img_gray, mask):
     if len(values) == 0: return 0.0
     return np.var(values)
 
+def get_complexity_score(img_gray, mask):
+    """计算区域复杂度：基于 Sobel 梯度的能量分布 (用于区分平滑金属与高频颗粒)"""
+    if mask is None or cv2.countNonZero(mask) == 0:
+        return 0.0
+    # 为提高效率，裁剪到 ROI
+    x, y, w, h = cv2.boundingRect(mask)
+    roi = img_gray[y:y+h, x:x+w]
+    roi_mask = mask[y:y+h, x:x+w]
+    
+    sobelx = cv2.Sobel(roi, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(roi, cv2.CV_64F, 0, 1, ksize=3)
+    mag = cv2.magnitude(sobelx, sobely)
+    
+    # 计算 Mask 区域内的能量均值
+    values = mag[roi_mask > 0]
+    if len(values) == 0: return 0.0
+    return np.mean(values)
+
 # 配置
 MODEL_TYPE = "vit_b"
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "sam_vit_b.pth")
@@ -175,90 +193,82 @@ def detect_plate_regions(img):
 
 def is_food_mask(mask, img_hsv, img_gray, roi_box, region_name=""):
     """
-    判断 mask 是否为食物，结合颜色、亮度、纹理密度和颗粒感特征
-    region_name: 区域名称，用于对米饭区进行特殊处理
+    判断 mask 是否为食物，结合颜色、亮度、纹理、颗粒度及复杂度特征
     """
     x1, y1, w, h = roi_box
     x2, y2 = x1 + w, y1 + h
-    
-    # 判断是否为米饭区
     is_rice_region = '米饭' in region_name
 
-    # 提取 ROI 区域
     mask_roi = mask[y1:y2, x1:x2]
     hsv_roi = img_hsv[y1:y2, x1:x2]
     gray_roi = img_gray[y1:y2, x1:x2]
 
-    # 基础校验
     if mask_roi.size == 0: return False, 0
     non_zero_pixels = cv2.countNonZero(mask_roi.astype(np.uint8))
     if non_zero_pixels < 50: return False, 0
 
-    # 获取 Mask 区域内的特征值
     masked_hsv = hsv_roi[mask_roi > 0]
     if len(masked_hsv) == 0: return False, 0
 
     avg_saturation = np.mean(masked_hsv[:, 1])
     avg_value = np.mean(masked_hsv[:, 2])
     
-    # 1. 纹理与颗粒感校验 (核心优化点：区分金属与米饭)
+    # 核心特征计算
     texture_score = get_texture_score(gray_roi, mask_roi)
     laplacian_var = get_laplacian_variance(gray_roi, mask_roi)
+    complexity_score = get_complexity_score(gray_roi, mask_roi)
     
-    # [LOG] 打印所有关键指标以供提示
-    lap_v_global = laplacian_var # 保持局部变量名一致
-    # 打印每个候选 Mask 的详细特征
-    print(f"    - [DEBUG] Mask Scan: S={avg_saturation:.1f}, V={avg_value:.1f}, Lap={laplacian_var:.1f}, Tex={texture_score:.3f}, Rice={is_rice_region}")
+    print(f"    - [DEBUG] Mask Scan: S={avg_saturation:.1f}, V={avg_value:.1f}, Lap={laplacian_var:.1f}, Tex={texture_score:.3f}, Comp={complexity_score:.2f}, Rice={is_rice_region}")
 
-    # 2. 核心判定逻辑
-    
-    # 彩色食物 (饱和度较高)
-    if avg_saturation > 35: # 提升饱和度门槛，减少反射环境色导致的误判
-        return True, 1.0
-
-    # 深色食物 (亮度极低)
-    if avg_value < 65:
-        return True, 1.0
-
-    # 白色食物 (米饭、豆腐) - 重点排查区
-    if avg_saturation < 30 and avg_value > 160:
-        # 米饭由于米粒间的阴影，具有极高的纹理密度
-        # 但对于米饭区，我们放宽纹理要求，因为满满的白米饭纹理确实较低
-        
-        # === 【优化 2】 米饭区使用极低的纹理阈值 ===
-        texture_threshold = 0.01 if is_rice_region else 0.35
-        if texture_score < texture_threshold:
-            print(f"    [排除] 疑似盘底反光 (亮白但光滑): Tex={texture_score:.3f}")
-            return False, 0.0
-        
-        # 对于米饭区，直接通过
-        if is_rice_region:
-            return True, 1.0
-        
-        # 拉普拉斯方差也要配合检查
-        if laplacian_var > 1500:
-            return True, 1.0
-        
+    # === 【深度优化 V3】 复杂度防御 (核心：区分规律性反射与米饭) ===
+    # 空盘子复杂度极低 (Comp < 12)，米饭复杂度极高 (Comp > 20)
+    # 对于米饭区，稍微放宽复杂度门槛，从 14.0 降至 12.0
+    complexity_threshold = 12.0 if is_rice_region else 14.0
+    if complexity_score < complexity_threshold:
+        print(f"    [排除] 区域复杂度过低 (疑似平铺反光面): Comp={complexity_score:.2f}")
         return False, 0.0
 
-    # === 【优化 3】 针对高光盘底的终极防御 ===
-    # 如果亮度极高 (反光)，除非纹理极其极其丰富 (乱糟糟的剩饭)，否则一律杀掉
-    # 但对米饭区放宽限制
+    # === 【深度优化 V2】 饱和度防御 (拦截纯灰色金属反射) ===
+    if avg_saturation < 8.0:
+        if texture_score < 0.4:
+            print(f"    [排除] 纯灰色低饱和度 (疑似金属反射): S={avg_saturation:.1f}")
+            return False, 0.0
+
+    # 2. 核心判定逻辑
+    if avg_saturation > 35: return True, 1.0
+    if avg_value < 65: return True, 1.0
+
+    # 白色食物 (米饭、豆腐) - 重点排查区
+    if avg_saturation < 30 and avg_value > 150:
+        # === 【优化 2】 米饭区提升纹理要求 ===
+        texture_threshold = 0.12 if is_rice_region else 0.35
+        if texture_score < texture_threshold:
+            print(f"    [排除] 纹理不足 (不具备米饭颗粒感): Tex={texture_score:.3f}")
+            return False, 0.0
+        
+        if is_rice_region:
+            if laplacian_var > 600:
+                return True, 1.0
+            else:
+                print(f"    [排除] 锐度不足 (疑似金属平滑面): Lap={laplacian_var:.1f}")
+                return False, 0.0
+        
+        if laplacian_var > 1500: return True, 1.0
+        return False, 0.0
+
+    # === 【优化 3】 针对高光盘底的防御 ===
     if avg_value > 200:
-        texture_req = 0.01 if is_rice_region else 0.45
+        texture_req = 0.10 if is_rice_region else 0.45
         if texture_score < texture_req:
             print(f"    [排除] 高光区域纹理不足: V={avg_value:.1f}, Tex={texture_score:.3f}")
             return False, 0.0
         if is_rice_region:
-            return True, 1.0
+            if laplacian_var > 350: return True, 1.0 # 从 400 降至 350
+            return False, 0.0
 
-    # 3. 滑动判定：如果既没颜色，纹理又不强，则视为盘底
-    # 对米饭区放宽基准
-    if is_rice_region:
-        return True, 1.0  # 米饭区只要通过了前面的校验，就认为是食物
-    
-    if laplacian_var < 750 or texture_score < 0.15:
-        return False, 0.0
+    # 3. 滑动判定
+    if is_rice_region: return True, 1.0
+    if laplacian_var < 750 or texture_score < 0.15: return False, 0.0
 
     return False, 0.0
 
@@ -336,11 +346,11 @@ def process_sam_image(img, sam_model, result_save_path=None):
             coverage = mask_pixel_count / roi_area
             
             # === 【优化 1】 强力拦截：如果 Mask 填满了格子，它一定是盘底，不是剩菜 ===
-            # 但对米饭区放宽限制，因为米饭确实可能填满整个格子
+            # 对于米饭区，即便装满也应该有边缘留白。从 90% 提升至 98% 以允许满盛情况。
             is_rice_region = '米饭' in name
-            coverage_threshold = 0.95 if is_rice_region else 0.85  # 米饭区允许更高覆盖率
+            coverage_threshold = 0.98 if is_rice_region else 0.85
             if coverage > coverage_threshold:
-                print(f"  [忽略] Mask-{m_idx} 面积过大 ({coverage:.1%})，判定为盘底背景")
+                print(f"  [忽略] Mask-{m_idx} 面积过大 ({coverage:.1%})，判定为格子背景/盘底")
                 continue
             # ===================================================================
             
@@ -355,7 +365,7 @@ def process_sam_image(img, sam_model, result_save_path=None):
             if is_food and scores[m_idx] > best_score:
                 best_score = scores[m_idx]
                 best_mask = m_roi
-
+        
         if best_mask is not None:
             # === 后处理：形态学滤波 ===
             kernel = np.ones((3,3), np.uint8)
@@ -381,7 +391,7 @@ def process_sam_image(img, sam_model, result_save_path=None):
         })
         
         combined_food_mask[y1:y2, x1:x2] = cv2.bitwise_or(combined_food_mask[y1:y2, x1:x2], food_mask_in_roi)
-
+    
     overall_ratio = (total_food_pixels / total_plate_capacity) * 100 if total_plate_capacity > 0 else 0
     overall_ratio = min(overall_ratio, 100.0)
 
@@ -394,7 +404,7 @@ def process_sam_image(img, sam_model, result_save_path=None):
     print("-" * 40)
     print(f"【汇总】全盘总剩余率: {overall_ratio:.1f}%")
     print(f"{'='*40}\n")
-
+    
     # 6. 可视化 (仅当指定保存路径时)
     if result_save_path:
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
@@ -426,12 +436,12 @@ def process_sam_image(img, sam_model, result_save_path=None):
             axes[1, idx].imshow(food_overlay, alpha=0.3)
             axes[1, idx].set_title(f"{r['name']}: {r['ratio']:.1f}%")
             axes[1, idx].axis('off')
-        
+            
         plt.tight_layout()
         plt.savefig(result_save_path)
         print(f"详细分析图已保存至: {result_save_path}")
         plt.close(fig) # 释放内存
-    
+        
     return overall_ratio, results, img_processed
 
 def analyze_leftovers_sam(image_path, sam_model):
@@ -452,7 +462,7 @@ def main():
     if not os.path.exists(MODEL_PATH):
         print(f"错误：未找到 SAM 模型文件: {MODEL_PATH}")
         return
-    
+        
     sam_model = load_sam_model()
     for filename in os.listdir(picture_dir):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and '_result' not in filename:

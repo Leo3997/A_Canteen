@@ -14,6 +14,7 @@ sys.path.append(SAM_DIR)
 
 # 导入原有逻辑
 from area_sam import load_sam_model, process_sam_image
+from .config_service import get_config_service
 
 class VisionService:
     _instance = None
@@ -38,6 +39,9 @@ class VisionService:
             "qingcai": "清炒时蔬",
             "mifannigga": "米饭",
             "hongshaonirou": "红烧牛肉",
+            "shuizhuroupian": "水煮肉片",
+            "qingjiaochaorou": "青椒炒肉",
+            "mantou": "馒头",
             "tray": "餐盘"
         }
 
@@ -49,8 +53,9 @@ class VisionService:
         try:
             self.yolo_model = YOLO(self.yolo_model_path)
             for idx, name in self.yolo_model.names.items():
-                if name.lower() in self.food_name_map:
-                    self.yolo_model.names[idx] = self.food_name_map[name.lower()]
+                normalized_name = name.lower().strip()
+                if normalized_name in self.food_name_map:
+                    self.yolo_model.names[idx] = self.food_name_map[normalized_name]
             print("✅ YOLO 模型加载成功并已同步中文名称")
         except Exception as e:
             print(f"❌ YOLO 加载失败: {e}")
@@ -72,8 +77,11 @@ class VisionService:
     def _get_cap(self):
         """延迟初始化摄像头"""
         if self.cap is None or not self.cap.isOpened():
+            config = get_config_service().get_config()
+            src = config.get("system", {}).get("camera_index", 0)
+            
             # 使用 DSHOW 提速 (Windows 推荐)
-            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            self.cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         return self.cap
@@ -131,18 +139,72 @@ class VisionService:
             os.makedirs(save_dir)
 
         filename = f"result_{int(torch.randint(0, 1000000, (1,)).item())}.png"
+        heatmap_filename = filename.replace(".png", "_heatmap.png")
         result_save_path = os.path.join(save_dir, filename)
+        heatmap_save_path = os.path.join(save_dir, heatmap_filename)
 
-        # 1. SAM 分割与透视矫正
-        overall_ratio, sam_results, warped_img = process_sam_image(
-            frame, 
-            self.sam_model, 
-            result_save_path=result_save_path
-        )
+        # 0. 读取配置
+        config = get_config_service().get_config()
+        rec_config = config.get("recognition", {})
+        gamma = rec_config.get("gamma_correction", 1.0)
+        conf_thres = rec_config.get("confidence_threshold", 0.45)
+        enable_sam = rec_config.get("enable_sam", True)
+        
+        # 应用 Gamma 矫正
+        if gamma != 1.0:
+             invGamma = 1.0 / gamma
+             table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+             frame = cv2.LUT(frame, table)
+
+        # 1. SAM 分割与透视矫正 (可配置)
+        if enable_sam:
+            overall_ratio, sam_results, warped_img = process_sam_image(
+                frame, 
+                self.sam_model, 
+                result_save_path=result_save_path
+            )
+        else:
+            # 极速模式：跳过 SAM，直接使用原图
+            overall_ratio = 0.0
+            sam_results = []
+            warped_img = frame.copy()
+            cv2.imwrite(result_save_path, warped_img)
+
+
+        # === 4. 生成复杂度热力图 (仅 SAM 模式下) ===
+        heatmap_filename = None
+        if enable_sam:
+            try:
+                warped_gray = cv2.cvtColor(warped_img, cv2.COLOR_BGR2GRAY)
+                sobelx = cv2.Sobel(warped_gray, cv2.CV_64F, 1, 0, ksize=3)
+                sobely = cv2.Sobel(warped_gray, cv2.CV_64F, 0, 1, ksize=3)
+                mag = cv2.magnitude(sobelx, sobely)
+                
+                # 改进归一化：忽略极高端 2% 的反光噪点，防止颜色被压平
+                v_max = np.percentile(mag, 98)
+                if v_max <= 0: v_max = 1.0
+                
+                # 线性拉伸并裁剪
+                mag_norm = np.clip(mag / v_max, 0, 1)
+                
+                # 非线性增强：使用平方增强纹理对比度 (使得红黄绿层次分明)
+                mag_norm = np.power(mag_norm, 0.8) # 略微拉高暗部，使得细节更明显
+                mag_byte = (mag_norm * 255).astype(np.uint8)
+                
+                # 应用伪彩色 (Jet)
+                heatmap = cv2.applyColorMap(mag_byte, cv2.COLORMAP_JET)
+                
+                # 叠加原图：增加热力图占比 (0.3 原图 + 0.7 热力图)，使颜色更鲜艳
+                heatmap_overlay = cv2.addWeighted(warped_img, 0.3, heatmap, 0.7, 0)
+                cv2.imwrite(heatmap_save_path, heatmap_overlay)
+            except Exception as e:
+                print(f"⚠️ 热力图生成失败: {e}")
+                heatmap_filename = None
         
         # 2. 在矫正后的图上运行 YOLO 识别菜品名称
-        warped_yolo_results = self.yolo_model(warped_img, verbose=False, conf=0.25)
+        warped_yolo_results = self.yolo_model(warped_img, verbose=False, conf=conf_thres)
         
+        confidences = []
         warped_detections = []
         warped_h, warped_w = warped_img.shape[:2]
         warped_area = warped_h * warped_w
@@ -163,38 +225,59 @@ class VisionService:
                 'box': top_left_box, 
                 'is_rice': cls_name.lower() == 'rice'
             })
+            confidences.append(float(box.conf[0].cpu().numpy()))
 
         # 3. 空间匹配
         final_items = []
-        for grid_item in sam_results:
-            grid_rect = grid_item['grid_rect'] # x, y, w, h
-            grid_name = grid_item['name']
-            best_match_name = None
-            min_dist = 99999
-            
-            for det in warped_detections:
-                if det.get('is_rice', False) and '米饭' not in grid_name:
-                    continue
+        if enable_sam:
+            # SAM 模式：将 YOLO 框匹配到 SAM 网格
+            for grid_item in sam_results:
+                grid_rect = grid_item['grid_rect'] # x, y, w, h
+                grid_name = grid_item['name']
+                best_match_name = None
+                min_dist = 99999
                 
-                d = self.get_center_distance(grid_rect, det['box'])
-                if d < min(grid_rect[2], grid_rect[3]) * 0.8:
-                    if d < min_dist:
-                        min_dist = d
-                        best_match_name = det['name']
-            
-            # 获取中文名称
-            display_name = self.food_name_map.get(best_match_name, best_match_name) if best_match_name else grid_name
-            
-            final_items.append({
-                "category": display_name,
-                "waste_rate": round(grid_item['ratio'], 2),
-                "original_grid": grid_name
-            })
+                for det in warped_detections:
+                    if det.get('is_rice', False) and '米饭' not in grid_name:
+                        continue
+                    
+                    d = self.get_center_distance(grid_rect, det['box'])
+                    if d < min(grid_rect[2], grid_rect[3]) * 0.8:
+                        if d < min_dist:
+                            min_dist = d
+                            best_match_name = det['name']
+                
+                # 获取中文名称
+                if best_match_name:
+                    normalized_match = best_match_name.lower().strip()
+                    display_name = self.food_name_map.get(normalized_match, best_match_name)
+                else:
+                    display_name = "未录入菜品"
+                
+                final_items.append({
+                    "category": display_name,
+                    "waste_rate": round(grid_item['ratio'], 2),
+                    "original_grid": grid_name
+                })
+        else:
+            # 极速模式：直接列出识别到的物体
+            for det in warped_detections:
+                raw_name = det['name']
+                normalized_name = raw_name.lower().strip()
+                display_name = self.food_name_map.get(normalized_name, raw_name)
+                
+                final_items.append({
+                    "category": display_name,
+                    "waste_rate": 0.0, # 不计算剩菜率
+                    "original_grid": "全图模式"
+                })
 
         return {
             "total_waste_rate": round(overall_ratio, 2),
             "items": final_items,
-            "result_image": filename
+            "result_image": filename,
+            "heatmap_image": heatmap_filename,
+            "average_confidence": round(float(np.mean(confidences)), 3) if confidences else 0.0
         }, None
 
 # 辅助函数，确保单例初始化

@@ -9,9 +9,11 @@ class MealRecord(Base):
     __tablename__ = "meal_records"
     
     id = Column(Integer, primary_key=True, index=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     image_path = Column(String)
+    heatmap_path = Column(String, nullable=True)
     total_waste_rate = Column(Float)
+    confidence = Column(Float)
     
     details = relationship("WasteDetail", back_populates="record")
 

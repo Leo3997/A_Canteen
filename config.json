@@ -1,0 +1,18 @@
+{
+    "recognition": {
+        "confidence_threshold": 0.45,
+        "enable_sam": true,
+        "auto_perspective": true,
+        "gamma_correction": 1
+    },
+    "ai": {
+        "api_key": "",
+        "model": "qwen-turbo",
+        "system_prompt": ""
+    },
+    "system": {
+        "camera_index": 0,
+        "cooldown_seconds": 3,
+        "auto_mode": true
+    }
+}
