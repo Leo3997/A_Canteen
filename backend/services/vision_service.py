@@ -172,7 +172,9 @@ class VisionService:
 
 
         # === 4. 生成复杂度热力图 (仅 SAM 模式下) ===
-        heatmap_filename = None
+        # heatmap_filename 已经在上方定义，这里不需要重新初始化为 None，
+        # 除非生成失败或者是非 SAM 模式，才需要在返回前处理。
+        
         if enable_sam:
             try:
                 warped_gray = cv2.cvtColor(warped_img, cv2.COLOR_BGR2GRAY)
@@ -200,6 +202,8 @@ class VisionService:
             except Exception as e:
                 print(f"⚠️ 热力图生成失败: {e}")
                 heatmap_filename = None
+        else:
+             heatmap_filename = None
         
         # 2. 在矫正后的图上运行 YOLO 识别菜品名称
         warped_yolo_results = self.yolo_model(warped_img, verbose=False, conf=conf_thres)
