@@ -16,6 +16,15 @@ from .models import MealRecord, WasteDetail
 from .services.vision_service import get_vision_service
 from .services.ai_service import get_ai_service
 from .services.config_service import get_config_service
+import time
+
+# 内存缓存配置
+stats_cache = {
+    "summary": {"data": None, "expires": 0},
+    "trends": {"data": None, "expires": 0},
+    "taste": {"data": None, "expires": 0}
+}
+CACHE_TTL = 300  # 5 分钟缓存
 
 app = FastAPI(title="Smart Canteen API", description="智慧食堂剩菜识别与分析系统")
 
@@ -148,6 +157,11 @@ async def get_taste_stats(db: Session = Depends(get_db)):
     """
     口味偏好分析：统计各菜品的平均剩余率
     """
+    # 尝试读取缓存
+    cur_time = time.time()
+    if stats_cache["taste"]["data"] and stats_cache["taste"]["expires"] > cur_time:
+         return stats_cache["taste"]["data"]
+
     stats = db.query(
         WasteDetail.food_name,
         func.avg(WasteDetail.waste_rate).label("avg_waste"),
@@ -178,6 +192,9 @@ async def get_taste_stats(db: Session = Depends(get_db)):
     # 按受欢迎度排序
     results.sort(key=lambda x: x["popularity_score"], reverse=True)
     
+    # 更新缓存
+    stats_cache["taste"] = {"data": results, "expires": cur_time + CACHE_TTL}
+    
     return results
 
 @app.get("/api/dashboard/summary")
@@ -185,6 +202,11 @@ async def get_dashboard_summary(db: Session = Depends(get_db)):
     """
     获取控制台首页摘要统计数据
     """
+    # 尝试读取缓存
+    cur_time = time.time()
+    if stats_cache["summary"]["data"] and stats_cache["summary"]["expires"] > cur_time:
+         return stats_cache["summary"]["data"]
+
     from datetime import timedelta, date
     
     # 1. 累计记录数
@@ -228,19 +250,28 @@ async def get_dashboard_summary(db: Session = Depends(get_db)):
     # 5. 活动节点
     active_nodes = 1
     
-    return {
+    result = {
         "total_records": total_records,
         "growth_rate": growth_rate,
         "avg_waste_rate": round(float(avg_waste), 1),
         "accuracy": accuracy,
         "active_nodes": active_nodes
     }
+    
+    # 更新缓存
+    stats_cache["summary"] = {"data": result, "expires": cur_time + CACHE_TTL}
+    
+    return result
 
 @app.get("/api/dashboard/trends")
 async def get_dashboard_trends(db: Session = Depends(get_db)):
     """
     获取过去 7 天的多维度趋势统计
     """
+    # 尝试读取缓存
+    cur_time = time.time()
+    if stats_cache["trends"]["data"] and stats_cache["trends"]["expires"] > cur_time:
+         return stats_cache["trends"]["data"]
     from datetime import timedelta, date
     
     today = date.today()
@@ -281,6 +312,9 @@ async def get_dashboard_trends(db: Session = Depends(get_db)):
         trends["records"].append(day_data["records"])
         trends["accuracy"].append(day_data["accuracy"])
         
+    # 更新缓存
+    stats_cache["trends"] = {"data": trends, "expires": time.time() + CACHE_TTL}
+    
     return trends
 
 @app.post("/api/ai/chat")
@@ -307,13 +341,19 @@ async def ai_chat(
     return {"reply": response}
 
 @app.get("/api/records")
-async def get_records(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
+async def get_records(page: int = 1, limit: int = 10, search: str = None, db: Session = Depends(get_db)):
     """
-    分页获取识别历史记录
+    分页获取识别历史记录，支持按菜品名称搜索
     """
     offset = (page - 1) * limit
-    total = db.query(func.count(MealRecord.id)).scalar()
-    records = db.query(MealRecord).order_by(MealRecord.timestamp.desc()).offset(offset).limit(limit).all()
+    query = db.query(MealRecord)
+    
+    if search:
+        # 支持按菜品名称、格ID进行搜索
+        query = query.join(WasteDetail).filter(WasteDetail.food_name.like(f"%{search}%")).distinct()
+    
+    total = query.count()
+    records = query.order_by(MealRecord.timestamp.desc()).offset(offset).limit(limit).all()
     
     return {
         "total": total,
@@ -413,6 +453,25 @@ def update_system_config(config: Dict[str, Any] = Body(...)):
     """更新系统全局配置"""
     get_config_service().update_config(config)
     return {"status": "success", "message": "配置已更新"}
+
+@app.post("/api/reports/export")
+def export_report(db: Session = Depends(get_db)):
+    """
+    生成并导出 Excel 分析报告
+    """
+    try:
+        from .services.report_service import get_report_service
+        report_path = get_report_service(db).generate_excel_report()
+        # 将反斜杠转换为正斜杠，以适配 URL
+        relative_url = "/" + report_path.replace("\\", "/")
+        return {"url": relative_url, "filename": os.path.basename(report_path)}
+    except Exception as e:
+        import traceback
+        error_msg = traceback.format_exc()
+        with open("server_debug.log", "w", encoding="utf-8") as f:
+            f.write(error_msg)
+        print(f"Export Error detected: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

@@ -28,6 +28,7 @@ const API_BASE = "http://localhost:8000";
 const SettingsPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState("recognition");
   const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [exporting, setExporting] = useState(false);
   const [config, setConfig] = useState<any>({
     recognition: {
       confidence_threshold: 0.45,
@@ -102,6 +103,31 @@ const SettingsPanel: React.FC = () => {
       if (res.ok) alert("数据清理完成");
     } catch (e) {
       alert("清理失败");
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/reports/export`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        const url = `${API_BASE}${data.url}`;
+        // Create auto-click link
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = data.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        alert("导出失败");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("导出出错");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -302,9 +328,15 @@ const SettingsPanel: React.FC = () => {
                  <CardDescription>导出记录或释放磁盘空间。</CardDescription>
                </CardHeader>
                <CardContent className="space-y-4">
-                 <Button variant="outline" className="w-full justify-start gap-2" onClick={() => alert("导出功能开发中...")}>
-                    <Download size={16} /> 导出所有记录为 Excel
-                 </Button>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start gap-2" 
+                    onClick={handleExport}
+                    disabled={exporting}
+                  >
+                     {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} 
+                     {exporting ? "正在生成 Excel..." : "导出所有记录为 Excel"}
+                  </Button>
                  
                  <div className="border-t pt-4">
                     <Button variant="destructive" className="w-full justify-start gap-2" onClick={handleClearData}>

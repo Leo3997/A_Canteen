@@ -73,6 +73,8 @@ class VisionService:
         self.cap = None
         self.latest_frame = None
         self.current_count = 0  # 实时物体计数
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f">>> 推理设备: {self.device}")
 
     def _get_cap(self):
         """延迟初始化摄像头"""
@@ -100,11 +102,13 @@ class VisionService:
             # 更新缓存帧，供 capture_frame 使用
             self.latest_frame = frame.copy()
             
-            # 运行 YOLO 推理
+            # 运行 YOLO 推理 (恢复满帧推理以保证视觉流畅度)
             if self.yolo_model:
-                results = self.yolo_model(frame, verbose=False, conf=0.4)
+                results = self.yolo_model(frame, verbose=False, conf=0.4, device=self.device)
                 self.current_count = len(results[0].boxes)
-                annotated_frame = results[0].plot()
+                self.annotated_frame = results[0].plot()
+                
+                annotated_frame = self.annotated_frame
             else:
                 self.current_count = 0
                 annotated_frame = frame
@@ -143,33 +147,40 @@ class VisionService:
         result_save_path = os.path.join(save_dir, filename)
         heatmap_save_path = os.path.join(save_dir, heatmap_filename)
 
-        # 0. 读取配置
-        config = get_config_service().get_config()
-        rec_config = config.get("recognition", {})
-        gamma = rec_config.get("gamma_correction", 1.0)
-        conf_thres = rec_config.get("confidence_threshold", 0.45)
-        enable_sam = rec_config.get("enable_sam", True)
-        
-        # 应用 Gamma 矫正
-        if gamma != 1.0:
-             invGamma = 1.0 / gamma
-             table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
-             frame = cv2.LUT(frame, table)
+        # 封装同步 CPU 任务，以便在线程池中运行
+        def sync_analysis_task():
+            # 0. 读取配置
+            config = get_config_service().get_config()
+            rec_config = config.get("recognition", {})
+            gamma = rec_config.get("gamma_correction", 1.0)
+            conf_thres = rec_config.get("confidence_threshold", 0.45)
+            enable_sam = rec_config.get("enable_sam", True)
+            
+            nonlocal frame
+            # 应用 Gamma 矫正
+            if gamma != 1.0:
+                 invGamma = 1.0 / gamma
+                 table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+                 frame = cv2.LUT(frame, table)
 
-        # 1. SAM 分割与透视矫正 (可配置)
-        if enable_sam:
-            overall_ratio, sam_results, warped_img = process_sam_image(
-                frame, 
-                self.sam_model, 
-                result_save_path=result_save_path
-            )
-        else:
-            # 极速模式：跳过 SAM，直接使用原图
-            overall_ratio = 0.0
-            sam_results = []
-            warped_img = frame.copy()
-            cv2.imwrite(result_save_path, warped_img)
+            # 1. SAM 分割与透视矫正
+            if enable_sam:
+                overall_ratio, sam_results, warped_img = process_sam_image(
+                    frame, 
+                    self.sam_model, 
+                    result_save_path=result_save_path
+                )
+            else:
+                overall_ratio = 0.0
+                sam_results = []
+                warped_img = frame.copy()
+                cv2.imwrite(result_save_path, warped_img)
 
+            return overall_ratio, sam_results, warped_img, enable_sam, conf_thres
+
+        # 在线程池中执行同步任务
+        import asyncio
+        overall_ratio, sam_results, warped_img, enable_sam, conf_thres = await asyncio.to_thread(sync_analysis_task)
 
         # === 4. 生成复杂度热力图 (仅 SAM 模式下) ===
         # heatmap_filename 已经在上方定义，这里不需要重新初始化为 None，

@@ -1,7 +1,7 @@
 # Dashboard Page Overrides
 
 > **PROJECT:** Smart Canteen
-> **Generated:** 2026-01-26 17:12:56
+> **Generated:** 2026-01-27 16:21:17
 > **Page Type:** Dashboard / Data View
 
 > ⚠️ **IMPORTANT:** Rules in this file **override** the Master file (`design-system/MASTER.md`).
@@ -13,13 +13,13 @@
 
 ### Layout Overrides
 
-- **Max Width:** 800px (narrow, focused)
-- **Layout:** Single column, centered
+- **Max Width:** 1200px (standard)
+- **Layout:** Full-width sections, centered content
 - **Sections:** 1. Dynamic hero (personalized), 2. Relevant features, 3. Tailored testimonials, 4. Smart CTA
 
 ### Spacing Overrides
 
-- **Content Density:** Low — focus on clarity
+- No overrides — use Master spacing
 
 ### Typography Overrides
 
@@ -31,8 +31,7 @@
 
 ### Component Overrides
 
-- Avoid: Auto-play high-res video loops
-- Avoid: Animate everything that moves
+- No overrides — use Master component specs
 
 ---
 
@@ -44,7 +43,5 @@
 
 ## Recommendations
 
-- Effects: KPI value animations (count-up), trend arrow direction animations, metric card hover lift, alert pulse effect
-- Sustainability: Click-to-play or pause when off-screen
-- Animation: Animate 1-2 key elements per view maximum
+- Effects: Number animations (count-up), trend direction indicators, percentage change animations, profit/loss color transitions
 - CTA Placement: Context-aware placement based on user segment

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { SpotlightCard, Magnetic, BlurReveal, CountUp, ShinyText, TiltedCard } from "@/components/ui/animated-components";
 import { 
   Card, 
   CardContent, 
@@ -24,9 +25,21 @@ import {
   Brain,
   Loader2,
   Send,
-  RotateCcw
+  RotateCcw,
+  Download
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { 
+  AreaChart, 
+  Area, 
+  Tooltip, 
+  ResponsiveContainer,
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis
+} from 'recharts';
 import SettingsPanel from "./SettingsPanel";
 
 const API_BASE = "http://localhost:8000";
@@ -57,15 +70,29 @@ const Dashboard: React.FC = () => {
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [userInput, setUserInput] = useState("");
   const [loadingAI, setLoadingAI] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [typingContent, setTypingContent] = useState("");
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
   // 消息自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, loadingAI]);
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
 
   // 获取实时检测统计 (轮询)
   const fetchTrends = async () => {
@@ -89,7 +116,7 @@ const Dashboard: React.FC = () => {
         } catch (err) {
           console.error("Failed to fetch detection stats:", err);
         }
-      }, 500);
+      }, 2000);
     }
     return () => clearInterval(interval);
   }, [activeTab]);
@@ -114,9 +141,14 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const fetchHistory = async (page = 1) => {
+  const fetchHistory = async (page = 1, search = searchQuery) => {
     try {
-      const resp = await fetch(`${API_BASE}/api/records?page=${page}&limit=8`);
+      const url = new URL(`${API_BASE}/api/records`);
+      url.searchParams.append("page", page.toString());
+      url.searchParams.append("limit", "8");
+      if (search) url.searchParams.append("search", search);
+      
+      const resp = await fetch(url.toString());
       const data = await resp.json();
       setHistoryRecords(data.data);
       setHistoryTotal(data.total);
@@ -164,10 +196,12 @@ const Dashboard: React.FC = () => {
     const messageText = text || userInput;
     if (!messageText.trim() || loadingAI) return;
 
-    const newMessages = [...chatMessages, { role: "user" as const, content: messageText }];
+    const userMsg = { role: "user" as const, content: messageText };
+    const newMessages = [...chatMessages, userMsg];
     setChatMessages(newMessages);
     setUserInput("");
     setLoadingAI(true);
+    setTypingContent("");
 
     try {
       const resp = await fetch(`${API_BASE}/api/ai/chat`, {
@@ -176,25 +210,81 @@ const Dashboard: React.FC = () => {
         body: JSON.stringify({ history: newMessages })
       });
       const data = await resp.json();
-      setChatMessages([...newMessages, { role: "assistant", content: data.reply }]);
+      
+      // 实现渐进式打字机效果
+      let currentText = "";
+      const fullText = data.reply;
+      const interval = setInterval(() => {
+        if (currentText.length < fullText.length) {
+          currentText += fullText[currentText.length];
+          setTypingContent(currentText);
+        } else {
+          clearInterval(interval);
+          setChatMessages(prev => [...prev, { role: "assistant", content: fullText }]);
+          setTypingContent("");
+        }
+      }, 20);
+
     } catch (err) {
       console.error("Failed to fetch AI response:", err);
-      setChatMessages([...newMessages, { role: "assistant", content: "抱歉，我现在无法回答您的问题，请检查网络或稍后重试。" }]);
+      setChatMessages(prev => [...prev, { role: "assistant", content: "抱歉，我现在无法回答您的问题，请检查网络或稍后重试。" }]);
     } finally {
       setLoadingAI(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === "overview") {
-      // 使用 Promise.all 并行加载，提速显示
-      Promise.all([fetchDashboardSummary(), fetchTrends()]);
-    } else if (activeTab === "analytics") {
-      fetchStats();
-    } else if (activeTab === "history") {
-      fetchHistory(1);
-    }
+    const init = async () => {
+      setIsInitialLoading(true);
+      if (activeTab === "overview") {
+        await Promise.all([fetchDashboardSummary(), fetchTrends()]);
+      } else if (activeTab === "analytics") {
+        await fetchStats();
+      } else if (activeTab === "history") {
+        await fetchHistory(1);
+      }
+      setIsInitialLoading(false);
+    };
+    init();
   }, [activeTab]);
+
+  // 处理搜索
+  useEffect(() => {
+    if (activeTab === "history") {
+      const timer = setTimeout(() => {
+        fetchHistory(1, searchQuery);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [searchQuery, activeTab]);
+
+  const filteredStats = stats.filter(item => 
+    item.food_name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/reports/export`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        const url = `${API_BASE}${data.url}`;
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = data.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        alert("导出失败");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("导出出错");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleCapture = async () => {
     if (uploading || cooldown) return;
@@ -279,74 +369,72 @@ const Dashboard: React.FC = () => {
   };
 
   const SidebarItem: React.FC<{ id: string; icon: any; label: string }> = ({ id, icon: Icon, label }) => (
-    <div 
-      className={`sidebar-item ${activeTab === id ? 'active' : ''}`}
-      onClick={() => setActiveTab(id)}
-    >
-      <Icon size={18} strokeWidth={2.5} />
-      <span>{label}</span>
-    </div>
+    <Magnetic distance={0.2}>
+      <div 
+        className={`sidebar-item ${activeTab === id ? 'active' : ''}`}
+        onClick={() => setActiveTab(id)}
+      >
+        <Icon size={18} strokeWidth={2.5} />
+        <span>{label}</span>
+      </div>
+    </Magnetic>
   );
 
-  const Sparkline: React.FC<{ data: number[], color?: string }> = ({ data, color }) => {
-    if (!data || data.length < 2) return <div className="w-[100px] h-[30px] flex items-center justify-center text-[10px] text-muted-foreground/30">无趋势</div>;
-    const max = Math.max(...data, 10);
-    const min = Math.min(...data, 0);
-    const range = (max - min) || 1;
-    const width = 100;
-    const height = 30;
-    
-    const points = data.map((v, i) => ({
-      x: (i / (data.length - 1)) * width,
-      y: height - ((v - min) / range) * height
-    }));
-    
-    const pathData = `M ${points.map(p => `${p.x},${p.y}`).join(' L ')}`;
-    const strokeColor = color || "currentColor";
-    const circleColor = color || "var(--primary)";
-    
+  const CompactChart: React.FC<{ data: number[], color: string, id: string }> = ({ data, color, id }) => {
+    const chartData = data.map((val, i) => ({ value: val, time: i }));
     return (
-      <svg width={width} height={height} className="overflow-visible">
-        <path
-          d={pathData}
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ opacity: 0.3 }}
-        />
-        <circle cx={points[points.length-1].x} cy={points[points.length-1].y} r="2.5" fill={circleColor} />
-      </svg>
+      <div className="w-[100px] h-[40px]">
+        <AreaChart width={100} height={40} data={chartData}>
+          <defs>
+            <linearGradient id={`gradient-${id}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
+              <stop offset="95%" stopColor={color} stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          <Area 
+            type="monotone" 
+            dataKey="value" 
+            stroke={color} 
+            strokeWidth={2} 
+            fillOpacity={1} 
+            fill={`url(#gradient-${id})`} 
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </div>
     );
   };
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden border-t">
+    <div className={`flex h-screen bg-background text-foreground overflow-hidden border-t ${isDarkMode ? "dark" : ""}`}>
       {/* Sidebar - Shadcn 精确风格 */}
       <aside className="w-56 flex flex-col h-full bg-background border-r">
         <div className="h-14 flex items-center px-6 border-b">
-          <div className="flex items-center gap-2 font-semibold tracking-tight">
-            <div className="w-6 h-6 bg-primary rounded-sm flex items-center justify-center text-primary-foreground">
-              <Utensils size={14} />
+          <Magnetic distance={0.3}>
+            <div className="flex items-center gap-2 font-semibold tracking-tight cursor-default">
+              <img src="/logo-transparent.png" alt="Smart Canteen" className="w-8 h-8 object-contain" />
+              得鹿山智慧餐厅
             </div>
-            智慧餐厅系统
-          </div>
+          </Magnetic>
         </div>
         
         <nav className="flex-1 px-4 py-6 space-y-1">
           <SidebarItem id="overview" icon={LayoutDashboard} label="控制台总览" />
           <SidebarItem id="analytics" icon={BarChart3} label="统计分析" />
           <SidebarItem id="history" icon={History} label="历史记录" />
-          <div 
-            className={`sidebar-item group relative overflow-hidden ${activeTab === 'ai' ? 'active' : ''}`}
-            onClick={() => handleTabChange("ai")}
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-            <Sparkles size={18} className={`${activeTab === 'ai' ? 'text-primary' : 'text-amber-500'}`} strokeWidth={2.5} />
-            <span className="flex-1">AI 智能专家</span>
-            <div className="bg-amber-100 text-amber-600 text-[10px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter">Pro</div>
-          </div>
+          <Magnetic distance={0.2}>
+            <div 
+              className={`sidebar-item group relative overflow-hidden ${activeTab === 'ai' ? 'active' : ''}`}
+              onClick={() => handleTabChange("ai")}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <Sparkles size={18} className={`${activeTab === 'ai' ? 'text-primary' : 'text-amber-500'}`} strokeWidth={2.5} />
+              <span className="flex-1">AI 智能专家</span>
+              <div className="bg-amber-100 px-1.5 py-0.5 rounded uppercase tracking-tighter shadow-sm overflow-hidden">
+                <ShinyText text="PRO" speed={3} className="text-[10px] font-black text-amber-600" />
+              </div>
+            </div>
+          </Magnetic>
           <SidebarItem id="settings" icon={Settings} label="系统设置" />
         </nav>
 
@@ -373,13 +461,31 @@ const Dashboard: React.FC = () => {
                <input 
                  type="text" 
                  placeholder="搜索菜品名称或记录..." 
+                 value={searchQuery}
+                 onChange={(e) => setSearchQuery(e.target.value)}
                  className="h-9 w-64 rounded-md border border-input bg-background pl-9 pr-3 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-all"
                />
+               {searchQuery && (
+                 <button 
+                   onClick={() => setSearchQuery("")}
+                   className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                 >
+                   ×
+                 </button>
+               )}
              </div>
           </div>
           <div className="flex items-center gap-3">
-             <div className="flex items-center gap-2 mr-4 pr-4 border-r">
-                <div className={`w-2 h-2 rounded-full ${autoMode ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-300'}`} />
+             <Button 
+               variant="ghost" 
+               size="icon" 
+               className="h-9 w-9 rounded-full"
+               onClick={() => setIsDarkMode(!isDarkMode)}
+             >
+               {isDarkMode ? <Sparkles size={18} className="text-amber-400" /> : <LayoutDashboard size={18} />}
+             </Button>
+             <div className="flex items-center gap-2 mr-4 pr-4 border-r relative">
+                {autoMode && <div className="pulse-indicator" />}
                 <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                    自动检测模式: {autoMode ? '开启' : '关闭'}
                 </span>
@@ -410,54 +516,71 @@ const Dashboard: React.FC = () => {
         </header>
 
         {/* 内容容器 */}
-        <ScrollArea className="flex-1 p-8 bg-neutral-50/30">
+        <ScrollArea className="flex-1 p-8 bg-muted/20">
           <div className="max-w-6xl mx-auto space-y-8">
             <div className="flex items-center justify-between">
-              <h2 className="text-3xl font-bold tracking-tight">控制台总览</h2>
+              <BlurReveal>
+                <h2 className="text-3xl font-bold tracking-tight">控制台总览</h2>
+              </BlurReveal>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="h-8 text-xs">下载分析报告</Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-8 text-xs gap-2"
+                  onClick={handleExport}
+                  disabled={exporting}
+                >
+                  {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                  {exporting ? "生成中..." : "下载分析报告"}
+                </Button>
               </div>
             </div>
 
             {/* 顶部数据摘要 - Shadcn 4 Cards 风格 */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 animate-in fade-in duration-700 slide-in-from-top-2">
-              <Card className="shadow-none border-border">
+              <SpotlightCard className="shadow-none border-border rounded-xl">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-tight">累计记录数</CardTitle>
                   <Activity size={16} className="text-muted-foreground" />
                 </CardHeader>
                 <CardContent className="flex items-end justify-between">
                   <div>
-                    <div className="text-2xl font-bold font-heading">{summary.total_records.toLocaleString()}</div>
-                    <p className="text-xs text-muted-foreground font-medium mt-1">
-                      <span className="text-emerald-500 font-bold">+{summary.growth_rate}%</span> 较上月
-                    </p>
+                    <div className="text-2xl font-bold font-heading">
+                      {isInitialLoading ? <div className="h-8 w-16 skeleton mb-1" /> : <CountUp to={summary.total_records} />}
+                    </div>
+                    <div className="text-xs text-muted-foreground font-medium mt-1">
+                      {isInitialLoading ? <div className="h-3 w-20 skeleton" /> : <><span className="text-emerald-500 font-bold">+{summary.growth_rate}%</span> 较上月</>}
+                    </div>
                   </div>
                   <div className="pb-1">
-                    <Sparkline data={trends.records} color="#10b981" />
+                    <CompactChart data={trends.records} color="#10b981" id="records" />
                   </div>
                 </CardContent>
-              </Card>
-              <Card className="shadow-none border-border">
+              </SpotlightCard>
+              <SpotlightCard className="shadow-none border-border rounded-xl">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-tight">平均浪费率</CardTitle>
                   <ArrowUpRight size={16} className={`text-muted-foreground ${summary.avg_waste_rate > 20 ? 'text-red-500' : 'text-emerald-500'}`} />
                 </CardHeader>
                 <CardContent className="flex items-end justify-between">
                   <div>
-                    <div className="text-2xl font-bold font-heading">{summary.avg_waste_rate}%</div>
-                    <p className="text-xs text-muted-foreground font-medium mt-1">
-                      <span className={summary.avg_waste_rate < 20 ? "text-emerald-500 font-bold" : "text-amber-500 font-bold"}>
-                        {summary.avg_waste_rate < 20 ? "表现优异" : "需关注"}
-                      </span>
-                    </p>
+                    <div className="text-2xl font-bold font-heading">
+                      {isInitialLoading ? <div className="h-8 w-16 skeleton mb-1" /> : <><CountUp to={summary.avg_waste_rate} decimals={1} />%</>}
+                    </div>
+                    <div className="text-xs text-muted-foreground font-medium mt-1">
+                      {isInitialLoading ? <div className="h-3 w-20 skeleton" /> : (
+                        <span className={summary.avg_waste_rate < 20 ? "text-emerald-500 font-bold" : "text-amber-500 font-bold"}>
+                          {summary.avg_waste_rate < 20 ? "表现优异" : "需关注"}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="pb-1">
-                    <Sparkline data={trends.waste} color={summary.avg_waste_rate > 20 ? "#f59e0b" : "#10b981"} />
+                    <CompactChart data={trends.waste} color={summary.avg_waste_rate > 20 ? "#f59e0b" : "#10b981"} id="waste" />
                   </div>
                 </CardContent>
-              </Card>
-              <Card className="shadow-none border-border">
+              </SpotlightCard>
+              <SpotlightCard className="shadow-none border-border rounded-xl">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-tight">识别准确率</CardTitle>
                   <Utensils size={16} className="text-muted-foreground" />
@@ -465,37 +588,41 @@ const Dashboard: React.FC = () => {
                 <CardContent className="flex items-end justify-between">
                   <div>
                     <div className="text-2xl font-bold font-heading">
-                      {summary.accuracy > 0 ? `${summary.accuracy}%` : "计算中..."}
+                      {isInitialLoading ? <div className="h-8 w-16 skeleton mb-1" /> : (
+                        <>{summary.accuracy > 0 ? <CountUp to={summary.accuracy} decimals={1} /> : "计算中..."}{summary.accuracy > 0 && "%"}</>
+                      )}
                     </div>
-                    <p className="text-xs text-muted-foreground font-medium mt-1">
-                      <span className="text-primary font-bold">
-                        {summary.accuracy > 90 ? "极高" : "稳定"}
-                      </span> 模型状态良好
-                    </p>
+                    <div className="text-xs text-muted-foreground font-medium mt-1">
+                      {isInitialLoading ? <div className="h-3 w-24 skeleton" /> : (
+                        <><span className="text-primary font-bold">{summary.accuracy > 90 ? "极高" : "稳定"}</span> 模型状态良好</>
+                      )}
+                    </div>
                   </div>
                   <div className="pb-1">
-                    <Sparkline data={trends.accuracy} color="#3b82f6" />
+                    <CompactChart data={trends.accuracy} color="#8b5cf6" id="accuracy" />
                   </div>
                 </CardContent>
-              </Card>
-              <Card className="shadow-none border-border bg-primary text-primary-foreground">
+              </SpotlightCard>
+              <SpotlightCard className="shadow-none border-border rounded-xl">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-primary-foreground/70 uppercase tracking-tight">活动监测节点</CardTitle>
-                  <Activity size={16} className="text-primary-foreground/70" />
+                  <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-tight">活跃监测节点</CardTitle>
+                  <Activity size={16} className="text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold font-heading">{summary.active_nodes} 节点</div>
-                  <p className="text-xs text-primary-foreground/50 font-medium mt-1">
-                    实时监控采集激活中
-                  </p>
+                  <div className="text-2xl font-bold font-heading">
+                    {isInitialLoading ? <div className="h-8 w-24 skeleton mb-1" /> : <>{summary.active_nodes} 节点</>}
+                  </div>
+                  <div className="text-xs text-muted-foreground font-medium mt-1">
+                    {isInitialLoading ? <div className="h-3 w-20 skeleton" /> : <><span className="text-emerald-500 font-bold">运行正常</span> - 实时监控中</>}
+                  </div>
                 </CardContent>
-              </Card>
+              </SpotlightCard>
             </div>
 
             {/* 复合视图 - 识别影像 + 实时记录 */}
             {activeTab === "overview" && (
               <div className="grid lg:grid-cols-3 gap-8 animate-in fade-in slide-in-from-bottom-2 duration-1000">
-                <Card className="lg:col-span-2 shadow-2xl border-border bg-neutral-900 overflow-hidden relative group min-h-[480px]">
+                <TiltedCard className="lg:col-span-2 shadow-2xl border-border bg-neutral-900 overflow-hidden relative group min-h-[480px] rounded-xl">
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10 opacity-60" />
                   <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
                      <div className="px-2 py-1 rounded bg-emerald-500 text-[10px] font-bold text-white uppercase tracking-widest animate-pulse">Live Feed</div>
@@ -506,6 +633,7 @@ const Dashboard: React.FC = () => {
                     alt="Vision Analysis" 
                     className="w-full h-full object-cover"
                   />
+                  {uploading && <div className="scan-line" />}
                   {cooldown && !uploading && !analysisResult && (
                      <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/20 backdrop-blur-[2px]">
                         <div className="bg-white/90 p-4 rounded-xl shadow-2xl flex flex-col items-center">
@@ -520,14 +648,14 @@ const Dashboard: React.FC = () => {
                     <div className="space-y-1">
                       <p className="text-xs font-bold text-white/60 uppercase tracking-widest">当前分析结果</p>
                       <h3 className="text-4xl font-black font-heading">
-                        {analysisResult ? `${analysisResult.total_waste_rate}%` : "等待数据..."}
+                        {analysisResult ? <><CountUp to={analysisResult.total_waste_rate} decimals={1} />%</> : "等待数据..."}
                       </h3>
                       <p className="text-sm font-medium text-white/80 flex items-center gap-2">
                         {analysisResult ? "实时浪费率监测已完成" : "正在实时监测用餐区域..."}
                       </p>
                     </div>
                   </div>
-                </Card>
+                </TiltedCard>
 
                 <Card className="shadow-none border-border h-full flex flex-col">
                   <CardHeader className="h-14 flex flex-row items-center justify-between border-b px-6 py-0">
@@ -585,6 +713,16 @@ const Dashboard: React.FC = () => {
                        <Brain size={16} className="text-primary" />
                        <span className="text-xs font-bold uppercase tracking-widest text-neutral-500">AI 经营专家在线</span>
                     </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="h-8 text-xs gap-2"
+                      onClick={handleExport}
+                      disabled={exporting}
+                    >
+                      {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                      {exporting ? "生成中..." : "下载分析报告"}
+                    </Button>
                   </div>
                   
                   <ScrollArea className="flex-1 p-6">
@@ -622,7 +760,16 @@ const Dashboard: React.FC = () => {
                         </div>
                       ))}
 
-                      {loadingAI && (
+                      {typingContent && (
+                        <div className="flex justify-start">
+                          <div className="max-w-[100%] rounded-2xl p-4 text-sm bg-muted/30 text-foreground border border-border/30 backdrop-blur-sm">
+                            <ReactMarkdown>{typingContent}</ReactMarkdown>
+                            <span className="inline-block w-1 h-4 bg-primary ml-1 animate-pulse" />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {loadingAI && !typingContent && (
                         <div className="flex justify-start">
                           <div className="flex gap-3">
                             <div className="w-8 h-8 rounded-lg bg-white border text-primary shadow-sm flex items-center justify-center">
@@ -700,49 +847,68 @@ const Dashboard: React.FC = () => {
                   </Button>
                 </div>
 
-                <Card className="shadow-none border-border">
-                  <CardContent className="p-0">
-                    <div className="w-full overflow-hidden rounded-md border-0">
-                      <table className="w-full text-left">
-                        <thead>
-                          <tr className="border-b bg-muted/50">
-                            <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider w-16">排名</th>
-                            <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider">菜品分类</th>
-                            <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider w-32">采集样本</th>
-                            <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider w-48">受欢迎度</th>
-                            <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider w-32">推荐状态</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {stats.map((item, idx) => (
-                            <tr key={idx} className="hover:bg-muted/50 transition-colors group">
-                              <td className="px-6 py-4 font-bold text-sm text-center md:text-left">#{idx + 1}</td>
-                              <td className="px-6 py-4">
-                                <span className="font-semibold text-sm">{item.food_name}</span>
-                              </td>
-                              <td className="px-6 py-4 text-sm text-muted-foreground">{item.sample_count}</td>
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex-1 max-w-[120px] bg-neutral-100 h-1.5 rounded-full overflow-hidden">
-                                     <div className="h-full bg-primary" style={{ width: `${item.popularity_score}%` }} />
-                                  </div>
-                                  <span className="text-xs font-black min-w-[32px]">{Math.round(item.popularity_score)}%</span>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                {idx < 3 ? (
-                                  <span className="px-2 py-1 rounded bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-tight">高度推荐</span>
-                                ) : (
-                                  <span className="px-2 py-1 rounded bg-neutral-100 text-neutral-500 text-[10px] font-bold uppercase tracking-tight">常规供应</span>
-                                )}
-                              </td>
+                <div className="grid md:grid-cols-2 gap-6">
+                  <Card className="shadow-none border-border overflow-hidden">
+                    <CardHeader className="border-b bg-muted/20 px-6 py-4">
+                      <CardTitle className="text-sm font-bold uppercase tracking-widest">多维偏好分布 (Radar)</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-6 h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RadarChart cx="50%" cy="50%" outerRadius="80%" data={filteredStats.slice(0, 6)}>
+                          <PolarGrid stroke="#e5e7eb" />
+                          <PolarAngleAxis dataKey="food_name" tick={{ fill: '#6b7280', fontSize: 10 }} />
+                          <PolarRadiusAxis angle={30} domain={[0, 100]} />
+                          <Radar
+                            name="Popularity"
+                            dataKey="popularity_score"
+                            stroke="#10b981"
+                            fill="#10b981"
+                            fillOpacity={0.6}
+                          />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                          />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-none border-border">
+                    <CardContent className="p-0">
+                      <div className="w-full overflow-hidden rounded-md border-0">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="border-b bg-muted/50">
+                              <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider w-16">排名</th>
+                              <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider">菜品分类</th>
+                              <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider w-32">样本数</th>
+                              <th className="px-6 py-4 text-xs font-bold text-muted-foreground uppercase tracking-wider w-24">分值</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </CardContent>
-                </Card>
+                          </thead>
+                          <tbody className="divide-y relative">
+                            {isInitialLoading ? (
+                               Array(5).fill(0).map((_, i) => (
+                                 <tr key={i}><td colSpan={4} className="px-6 py-4"><div className="h-6 w-full skeleton" /></td></tr>
+                               ))
+                            ) : (
+                              filteredStats.map((item, idx) => (
+                                <tr key={idx} className="hover:bg-muted/50 transition-colors group">
+                                  <td className="px-6 py-4 font-bold text-sm">#{idx + 1}</td>
+                                  <td className="px-6 py-4 font-semibold text-sm">{item.food_name}</td>
+                                  <td className="px-6 py-4 text-sm text-muted-foreground">{item.sample_count}</td>
+                                  <td className="px-6 py-4 font-black text-primary text-sm">{Math.round(item.popularity_score)}%</td>
+                                </tr>
+                              ))
+                            )}
+                            {!isInitialLoading && filteredStats.length === 0 && (
+                              <tr><td colSpan={4} className="px-6 py-10 text-center text-muted-foreground text-xs italic">未找到匹配菜品</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
 
               </div>
             )}
@@ -844,8 +1010,8 @@ const Dashboard: React.FC = () => {
 
       {/* 全局详情弹窗 */}
       {isDetailOpen && selectedRecord && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-card border shadow-2xl rounded-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-in fade-in duration-200">
+          <div className="bg-white border shadow-2xl rounded-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 text-neutral-900">
             <div className="p-6 border-b flex items-center justify-between">
               <div>
                   <h4 className="text-lg font-bold">识别详情追溯</h4>
@@ -866,21 +1032,27 @@ const Dashboard: React.FC = () => {
             <div className="flex-1 overflow-auto p-6 grid md:grid-cols-2 gap-8">
               {/* 左侧大图 */}
               <div className="space-y-4">
-                  <div className="rounded-lg border bg-neutral-100 overflow-hidden shadow-inner relative group">
-                    <img 
-                      src={showHeatmap && selectedRecord.heatmap_path ? `${API_BASE}/static/results/${selectedRecord.heatmap_path}` : `${API_BASE}/static/results/${selectedRecord.image_path}`} 
-                      alt="Detail" 
-                      className="w-full h-auto block transition-all"
-                    />
+                  <TiltedCard 
+                    className="relative aspect-[16/9] bg-neutral-900 rounded-xl overflow-hidden shadow-2xl border-4 border-white/10 cursor-zoom-in"
+                    onClick={() => setPreviewImage(showHeatmap && selectedRecord.heatmap_path ? `${API_BASE}/static/results/${selectedRecord.heatmap_path}` : `${API_BASE}/static/results/${selectedRecord.image_path}`)}
+                  >
+                  <img 
+                    src={showHeatmap && selectedRecord.heatmap_path ? `${API_BASE}/static/results/${selectedRecord.heatmap_path}` : `${API_BASE}/static/results/${selectedRecord.image_path}`} 
+                    alt="Detail" 
+                    className="w-full h-auto block transition-all"
+                  />
                     {showHeatmap && !selectedRecord.heatmap_path && (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-xs font-bold uppercase tracking-widest">
                         该记录无热力图数据
                       </div>
                     )}
+                    <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-md p-1.5 rounded-full text-white/80 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Search size={14} />
+                    </div>
                     <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-[8px] font-bold text-white uppercase tracking-widest">
                       {showHeatmap ? "Complexity Heatmap" : "Original Scan"}
                     </div>
-                  </div>
+                  </TiltedCard>
                   <div className="p-4 rounded-lg bg-muted/50 border space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">主图路径</span>
@@ -919,6 +1091,29 @@ const Dashboard: React.FC = () => {
                   </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 大图预览全局 Overlay */}
+      {previewImage && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-4 animate-in fade-in duration-200 cursor-zoom-out"
+          onClick={() => setPreviewImage(null)}
+        >
+          <img 
+            src={previewImage} 
+            alt="Full Preview" 
+            className="max-w-full max-h-full object-contain shadow-2xl animate-in zoom-in-95 duration-300 shadow-white/5"
+          />
+          <div className="absolute top-6 right-8 text-white/60 text-xs font-bold uppercase tracking-widest flex items-center gap-2 select-none">
+            点击任意位置关闭预览
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-10 w-10 text-white hover:bg-white/10 rounded-full border border-white/10"
+              onClick={() => setPreviewImage(null)}
+            >×</Button>
           </div>
         </div>
       )}
