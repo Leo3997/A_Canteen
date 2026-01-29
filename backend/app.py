@@ -17,6 +17,29 @@ from .services.vision_service import get_vision_service
 from .services.ai_service import get_ai_service
 from .services.config_service import get_config_service
 import time
+import asyncio
+from fastapi import WebSocket, WebSocketDisconnect
+
+# WebSocket 连接管理器
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: Dict[str, Any]):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                pass
+
+manager = ConnectionManager()
 
 # 内存缓存配置
 stats_cache = {
@@ -89,6 +112,27 @@ async def detection_stats():
     """获取当前实物体统计"""
     vision_service = get_vision_service()
     return {"count": vision_service.current_count}
+
+@app.websocket("/ws/status")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # 实时推送检测计数
+            vision_service = get_vision_service()
+            await manager.broadcast({
+                "type": "detection_update",
+                "data": {"count": vision_service.current_count}
+            })
+            await asyncio.sleep(0.5) # 0.5秒推送一次，比 HTTP 轮询更加实时且高效
+            
+            # 接收客户端消息（如有需要）
+            # data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
 
 @app.post("/api/capture")
 async def capture_and_analyze(db: Session = Depends(get_db)):
