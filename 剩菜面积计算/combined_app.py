@@ -19,7 +19,7 @@ from area_sam import load_sam_model, process_sam_image, draw_chinese_text
 
 # ================= 配置 =================
 # YOLO 模型路径 (名字识别)
-YOLO_MODEL_PATH = r"F:\视觉识别食堂\标准框多菜品识别\runs\detect\train_tray_v1\weights\best.pt"
+YOLO_MODEL_PATH = "E:\\实习相关\\杭州得鹿山\\智慧食堂\\标准框多菜品识别\\runs\\detect\\train_tray_v1\\weights\\best.pt"
 # 摄像头
 CAMERA_INDEX = 0
 # 稳定性检测参数

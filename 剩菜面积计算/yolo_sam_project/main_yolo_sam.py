@@ -6,8 +6,8 @@ from ultralytics import YOLO
 from segment_anything import sam_model_registry, SamPredictor
 
 # 配置
-YOLO_MODEL_PATH = "models/yolov8n.pt"  # 建议使用训练好的餐盘检测模型
-SAM_CHECKPOINT = "models/sam_vit_b.pth"
+YOLO_MODEL_PATH = "./models/yolov8n.pt"  # 建议使用训练好的餐盘检测模型
+SAM_CHECKPOINT = "./models/sam_vit_b.pth"
 SAM_MODEL_TYPE = "vit_b"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 

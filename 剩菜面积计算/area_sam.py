@@ -528,7 +528,7 @@ def analyze_leftovers_sam(image_path, sam_model):
     return overall_ratio
 
 def main():
-    picture_dir = r"F:\视觉识别食堂\剩菜面积计算\picture"
+    picture_dir = r".\picture"
     if not os.path.exists(MODEL_PATH):
         print(f"错误：未找到 SAM 模型文件: {MODEL_PATH}")
         return

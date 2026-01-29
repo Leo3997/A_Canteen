@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     
     # Camera & Model
     CAMERA_INDEX: int = 0
-    YOLO_MODEL_PATH: str = r"F:\视觉识别食堂\标准框多菜品识别\runs\detect\train_tray_v1\weights\best.pt"
+    YOLO_MODEL_PATH: str = r"e:\实习相关\杭州得鹿山\智慧食堂\标准框多菜品识别\runs\detect\train_tray_v1\weights\best.pt"
     
     # Recognition Algo
     CONFIDENCE_THRESHOLD: float = 0.45
