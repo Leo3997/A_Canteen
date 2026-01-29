@@ -3,7 +3,10 @@ from sqlalchemy.orm import sessionmaker
 from .models import Base
 import os
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./smart_canteen.db"
+from .core.config import settings
+import os
+
+SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}

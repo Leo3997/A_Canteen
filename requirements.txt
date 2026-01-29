@@ -11,3 +11,4 @@ matplotlib
 pillow
 pandas
 openpyxl
+pydantic-settings

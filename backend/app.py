@@ -62,8 +62,14 @@ def startup_event():
     except Exception as e:
         print(f"⚠️ 数据库迁移提醒: {e}")
 
-    # 预加载模型
-    get_vision_service()
+    # 预加载模型并启动后台线程
+    vs = get_vision_service()
+    vs.start_background_processing()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    print("Application shutting down...")
+    get_vision_service().stop_background_processing()
 
 @app.get("/")
 async def root():
@@ -95,7 +101,12 @@ async def capture_and_analyze(db: Session = Depends(get_db)):
     # 保存抓取的图片
     filename = f"capture_{int(datetime.now().timestamp())}.jpg"
     file_path = os.path.join(UPLOAD_DIR, filename)
-    cv2.imwrite(file_path, frame)
+    
+    # 确保 frame 是合法的
+    if frame is not None and frame.size > 0:
+        cv2.imwrite(file_path, frame)
+    else:
+        raise HTTPException(status_code=500, detail="Captured empty frame")
     
     return await _process_image_analysis(frame, filename, db)
 

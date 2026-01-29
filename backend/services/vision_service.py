@@ -7,6 +7,7 @@ from ultralytics import YOLO
 from PIL import Image
 
 # 添加“剩菜面积计算”目录到系统路径，以便导入原有模块
+# 添加“剩菜面积计算”目录到系统路径，以便导入原有模块
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 SAM_DIR = os.path.join(PROJECT_ROOT, "剩菜面积计算")
@@ -14,7 +15,9 @@ sys.path.append(SAM_DIR)
 
 # 导入原有逻辑
 from area_sam import load_sam_model, process_sam_image
-from .config_service import get_config_service
+from ..core.config import settings
+import threading
+import time
 
 class VisionService:
     _instance = None
@@ -45,8 +48,8 @@ class VisionService:
             "tray": "餐盘"
         }
 
-        # 2. 配置路径
-        self.yolo_model_path = r"F:\视觉识别食堂\标准框多菜品识别\runs\detect\train_tray_v1\weights\best.pt"
+        # 2. 配置路径 (使用 settings)
+        self.yolo_model_path = settings.YOLO_MODEL_PATH
         
         print(">>> 正在初始化 VisionService (单例模式)...")
         # 3. 加载 YOLO 并同步名称
@@ -63,24 +66,34 @@ class VisionService:
             
         # 4. 加载 SAM
         try:
-            self.sam_model = load_sam_model()
-            print("✅ SAM 模型加载成功")
+            if settings.ENABLE_SAM:
+                self.sam_model = load_sam_model()
+                print("✅ SAM 模型加载成功")
+            else:
+                self.sam_model = None
+                print("ℹ️ SAM 模型已禁用 (Config)")
         except Exception as e:
             print(f"❌ SAM 加载失败: {e}")
             self.sam_model = None
             
         self.initialized = True
         self.cap = None
-        self.latest_frame = None
+        self.latest_frame = None  # 原始帧
+        self.latest_jpeg = None   # 处理后的 JPEG (供推流)
         self.current_count = 0  # 实时物体计数
+        
+        # 线程控制
+        self.running = False
+        self.thread = None
+        self.lock = threading.Lock() # 互斥锁，保护模型推理
+        
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f">>> 推理设备: {self.device}")
 
     def _get_cap(self):
         """延迟初始化摄像头"""
         if self.cap is None or not self.cap.isOpened():
-            config = get_config_service().get_config()
-            src = config.get("system", {}).get("camera_index", 0)
+            src = settings.CAMERA_INDEX
             
             # 使用 DSHOW 提速 (Windows 推荐)
             self.cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
@@ -88,43 +101,84 @@ class VisionService:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         return self.cap
 
-    def get_video_stream(self):
-        """
-        MJPEG 视频流生成器
-        """
+    def start_background_processing(self):
+        """启动后台抓取与推理线程"""
+        if self.running:
+            return
+        
+        self.running = True
+        self.thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self.thread.start()
+        print(">>> 📷 后台视觉线程已启动")
+
+    def stop_background_processing(self):
+        """停止后台线程并释放资源"""
+        print(">>> 🛑 正在停止后台视觉线程...")
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=2.0)
+        
+        if self.cap and self.cap.isOpened():
+            self.cap.release()
+        print(">>> ✅ 摄像头资源已释放")
+
+    def _capture_loop(self):
+        """后台循环：抓图 -> 推理 -> 编码"""
         cap = self._get_cap()
         
-        while True:
+        while self.running:
             ret, frame = cap.read()
             if not ret:
-                break
+                time.sleep(0.1)
+                # 尝试重连?
+                continue
             
-            # 更新缓存帧，供 capture_frame 使用
+            # 更新原始帧 (供 Capture API 使用)
             self.latest_frame = frame.copy()
             
-            # 运行 YOLO 推理 (恢复满帧推理以保证视觉流畅度)
-            if self.yolo_model:
-                results = self.yolo_model(frame, verbose=False, conf=0.4, device=self.device)
-                self.current_count = len(results[0].boxes)
-                self.annotated_frame = results[0].plot()
-                
-                annotated_frame = self.annotated_frame
-            else:
-                self.current_count = 0
-                annotated_frame = frame
+            # 运行 YOLO 推理 (用于实时预览)
+            # 加锁防止与 analyze_tray 冲突
+            annotated_frame = frame
             
-            # 转换为 JPEG
+            if self.yolo_model:
+                try:
+                    # 使用 lock 保护 GPU/Model 状态
+                    with self.lock:
+                        results = self.yolo_model(frame, verbose=False, conf=settings.CONFIDENCE_THRESHOLD, device=self.device)
+                    
+                    if results:
+                        self.current_count = len(results[0].boxes)
+                        annotated_frame = results[0].plot()
+                except Exception as e:
+                    print(f"Inference error: {e}")
+            
+            # 编码为 JPEG
             ret, buffer = cv2.imencode('.jpg', annotated_frame)
-            if not ret:
-                continue
-                
-            frame_bytes = buffer.tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            if ret:
+                self.latest_jpeg = buffer.tobytes()
+            
+            # 控制帧率，避免死循环占用 100% CPU
+            # 假设摄像头 30fps，这里休眠一小会儿
+            time.sleep(0.01)
+
+    def get_video_stream(self):
+        """
+        MJPEG 视频流生成器 (消费者)
+        不再进行推理，直接返回最新 JPEG
+        """
+        while True:
+            if self.latest_jpeg:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + self.latest_jpeg + b'\r\n')
+            
+            # 限制发送频率，~25fps
+            time.sleep(0.04)
 
     def capture_frame(self):
         """返回当前流中的最新帧"""
-        return self.latest_frame
+        if self.latest_frame is not None:
+            return self.latest_frame
+        return None
 
     def get_center_distance(self, box1, box2):
         """计算两个矩形中心点的距离"""
@@ -149,12 +203,10 @@ class VisionService:
 
         # 封装同步 CPU 任务，以便在线程池中运行
         def sync_analysis_task():
-            # 0. 读取配置
-            config = get_config_service().get_config()
-            rec_config = config.get("recognition", {})
-            gamma = rec_config.get("gamma_correction", 1.0)
-            conf_thres = rec_config.get("confidence_threshold", 0.45)
-            enable_sam = rec_config.get("enable_sam", True)
+            # 0. 读取配置 (使用 settings)
+            gamma = settings.GAMMA_CORRECTION
+            conf_thres = settings.CONFIDENCE_THRESHOLD
+            enable_sam = settings.ENABLE_SAM
             
             nonlocal frame
             # 应用 Gamma 矫正
@@ -217,7 +269,9 @@ class VisionService:
              heatmap_filename = None
         
         # 2. 在矫正后的图上运行 YOLO 识别菜品名称
-        warped_yolo_results = self.yolo_model(warped_img, verbose=False, conf=conf_thres)
+        # 使用锁保护模型
+        with self.lock:
+             warped_yolo_results = self.yolo_model(warped_img, verbose=False, conf=conf_thres)
         
         confidences = []
         warped_detections = []
