@@ -1,0 +1,154 @@
+
+--- Analysis at 2026-01-28T09:19:01 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:49.71 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:43.73 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:36.23 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:32.24 Threshold:15.5
+  Rice Check: Saturation:31.01 Value:73.79
+
+--- Analysis at 2026-01-28T09:21:08 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:49.75 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:43.58 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:36.22 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:32.09 Threshold:15.5
+  Rice Check: Saturation:29.04 Value:73.47
+
+--- Analysis at 2026-01-28T09:21:11 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:108.18 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:58.39 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:42.50 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:37.83 Threshold:15.5
+  Rice Check: Saturation:24.38 Value:114.44
+
+--- Analysis at 2026-01-28T09:21:14 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:120.10 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:52.87 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:68.26 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:36.20 Threshold:15.5
+  Rice Check: Saturation:6.24 Value:101.59
+
+--- Analysis at 2026-01-28T09:21:16 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:44.03 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:55.41 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:74.08 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:82.50 Threshold:15.5
+  Rice Check: Saturation:144.33 Value:111.62
+
+--- Analysis at 2026-01-28T09:21:19 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:132.73 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:83.78 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:42.99 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:44.27 Threshold:15.5
+  Rice Check: Saturation:97.85 Value:133.06
+
+--- Analysis at 2026-01-28T09:21:21 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:131.32 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:79.20 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:75.23 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:40.17 Threshold:15.5
+  Rice Check: Saturation:113.95 Value:115.39
+
+--- Analysis at 2026-01-28T09:21:24 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:65.16 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:56.45 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:80.66 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:86.50 Threshold:15.5
+  Rice Check: Saturation:125.12 Value:105.65
+
+--- Analysis at 2026-01-28T09:21:26 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:115.49 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:86.32 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:41.67 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:42.21 Threshold:15.5
+  Rice Check: Saturation:37.13 Value:113.47
+
+--- Analysis at 2026-01-28T09:21:29 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:125.39 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:81.54 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:66.27 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:42.03 Threshold:15.5
+  Rice Check: Saturation:91.27 Value:126.61
+
+--- Analysis at 2026-01-28T09:21:32 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:65.16 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:56.45 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:80.66 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:86.50 Threshold:15.5
+  Rice Check: Saturation:125.12 Value:105.65
+
+--- Analysis at 2026-01-28T09:21:34 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:115.49 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:86.32 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:41.67 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:42.21 Threshold:15.5
+  Rice Check: Saturation:37.13 Value:113.47
+
+--- Analysis at 2026-01-28T09:21:37 ---
+ROI:0 Name:菜品区 1 (左上) Complexity:125.39 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:81.54 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:66.27 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:42.03 Threshold:15.5
+  Rice Check: Saturation:91.27 Value:126.61
+
+--- Analysis at 2026-01-28T09:23:13 ---
+Is Warped: False
+ROI:0 Name:菜品区 1 (左上) Complexity:49.71 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:43.73 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:36.23 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:32.24 Threshold:15.5
+  Rice Check: Saturation:31.01 Value:73.79
+
+--- Analysis at 2026-01-28T09:23:41 ---
+Is Warped: False
+ROI:0 Name:菜品区 1 (左上) Complexity:34.98 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:40.94 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:27.71 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:39.53 Threshold:15.5
+  Rice Check: Saturation:32.96 Value:170.93
+
+--- Analysis at 2026-01-28T09:24:27 ---
+Is Warped: False
+ROI:0 Name:菜品区 1 (左上) Complexity:63.19 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:40.06 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:35.55 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:41.05 Threshold:15.5
+  Rice Check: Saturation:30.63 Value:147.15
+
+--- Analysis at 2026-01-28T09:26:55 ---
+Is Warped: True
+ROI:0 Name:菜品区 1 (左上) Complexity:10.97 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:12.89 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:16.47 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:15.35 Threshold:15.5
+
+--- Analysis at 2026-01-28T09:27:08 ---
+Is Warped: False
+ROI:0 Name:菜品区 1 (左上) Complexity:33.71 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:34.38 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:31.55 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:31.59 Threshold:15.5
+  Rice Check: Saturation:23.85 Value:183.89
+
+--- Analysis at 2026-01-28T09:27:33 ---
+Is Warped: False
+ROI:0 Name:菜品区 1 (左上) Complexity:49.71 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:43.73 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:36.23 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:32.24 Threshold:15.5
+  Rice Check: Saturation:31.01 Value:73.79
+
+--- Analysis at 2026-01-28T09:27:52 ---
+Is Warped: False
+ROI:0 Name:菜品区 1 (左上) Complexity:58.71 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:67.80 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:29.49 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:53.92 Threshold:15.5
+  Rice Check: Saturation:29.56 Value:163.38
+
+--- Analysis at 2026-01-28T09:28:14 ---
+Is Warped: False
+ROI:0 Name:菜品区 1 (左上) Complexity:56.43 Threshold:12.0
+ROI:1 Name:菜品区 2 (右中) Complexity:55.35 Threshold:12.0
+ROI:2 Name:菜品区 3 (左长格) Complexity:31.59 Threshold:12.0
+ROI:3 Name:米饭区 (下长格) Complexity:48.43 Threshold:15.5
+  Rice Check: Saturation:26.09 Value:136.39

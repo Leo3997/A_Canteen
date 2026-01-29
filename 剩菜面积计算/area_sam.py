@@ -126,7 +126,7 @@ def warp_plate_to_template(img, template_size=(1024, 589)):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # 1. 预处理：增强对比度 + 边缘检测
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     gray_adj = clahe.apply(gray)
     blurred = cv2.GaussianBlur(gray_adj, (5, 5), 0)
     edged = cv2.Canny(blurred, 30, 150)
@@ -222,10 +222,16 @@ def is_food_mask(mask, img_hsv, img_gray, roi_box, region_name=""):
 
     # === 【深度优化 V3】 复杂度防御 (核心：区分规律性反射与米饭) ===
     # 空盘子复杂度极低 (Comp < 12)，米饭复杂度极高 (Comp > 20)
-    # 对于米饭区，稍微放宽复杂度门槛，从 14.0 降至 12.0
-    complexity_threshold = 12.0 if is_rice_region else 14.0
+    # 针对米饭区，显著提高门槛至 16.0，因为金属高光边缘通常在 12-15 之间
+    complexity_threshold = 16.0 if is_rice_region else 18.0
     if complexity_score < complexity_threshold:
         print(f"    [排除] 区域复杂度过低 (疑似平铺反光面): Comp={complexity_score:.2f}")
+        return False, 0.0
+
+    # === 【深度优化 V4】 物理属性拦截 (利用 S チャンネル) ===
+    # 金属反光的 S 值极低 (接近 0)，米饭虽然白但通常也会有 10-15 的环境色饱和度
+    if is_rice_region and avg_saturation < 12.0 and avg_value > 140:
+        print(f"    [排除] 检测到金属反光特征: S={avg_saturation:.1f}, V={avg_value:.1f}")
         return False, 0.0
 
     # === 【深度优化 V2】 饱和度防御 (拦截纯灰色金属反射) ===
@@ -241,13 +247,17 @@ def is_food_mask(mask, img_hsv, img_gray, roi_box, region_name=""):
     # 白色食物 (米饭、豆腐) - 重点排查区
     if avg_saturation < 30 and avg_value > 150:
         # === 【优化 2】 米饭区提升纹理要求 ===
-        texture_threshold = 0.12 if is_rice_region else 0.35
+        # 根据日志，真实米饭纹理在 0.05 左右，空盘通常更低
+        # 将阈值从 0.20 降至 0.04，以保证米饭不被拒识
+        texture_threshold = 0.04 if is_rice_region else 0.15
         if texture_score < texture_threshold:
             print(f"    [排除] 纹理不足 (不具备米饭颗粒感): Tex={texture_score:.3f}")
             return False, 0.0
         
         if is_rice_region:
-            if laplacian_var > 600:
+            # 日志显示真实米饭 Lap 约 42-45，不锈钢反光通常在 10-30
+            # 将锐度门槛从 1200 降至 35，以适应真实米饭，但结合下面的复杂度拦截
+            if laplacian_var > 35:
                 return True, 1.0
             else:
                 print(f"    [排除] 锐度不足 (疑似金属平滑面): Lap={laplacian_var:.1f}")
@@ -266,10 +276,19 @@ def is_food_mask(mask, img_hsv, img_gray, roi_box, region_name=""):
             if laplacian_var > 350: return True, 1.0 # 从 400 降至 350
             return False, 0.0
 
-    # 3. 滑动判定
-    if is_rice_region: return True, 1.0
-    if laplacian_var < 750 or texture_score < 0.15: return False, 0.0
+    # 3. 严格判定逻辑
+    # 日志显示复杂菜品复杂度通常在 25-100，空盘在 10-20
+    min_laplacian = 30 if is_rice_region else 50
+    min_texture = 0.035 if is_rice_region else 0.10
+    
+    if laplacian_var > min_laplacian and texture_score > min_texture:
+        return True, 1.0
+    
+    # 移除之前可能导致背景误报的高饱和度特例
+    # if avg_saturation > 50 and complexity_score > 20:
+    #     return True, 1.0
 
+    print(f"    [排除] 最终判定失败: Lap={laplacian_var:.1f}(min:{min_laplacian}), Tex={texture_score:.3f}(min:{min_texture})")
     return False, 0.0
 
 def process_sam_image(img, sam_model, result_save_path=None):
@@ -285,13 +304,20 @@ def process_sam_image(img, sam_model, result_save_path=None):
     target_size = (1024, 589)
     img_processed, is_warped = warp_plate_to_template(img, template_size=target_size)
     
-    # === 新增：Gamma 校正压制反光 ===
-    img_processed = adjust_gamma(img_processed, gamma=0.85)
+    # === 修改：不再在全局使用 CLAHE，防止放大不锈钢反射噪声 ===
+    # 恢复 Gamma 矫正，压低高光
+    img_processed = adjust_gamma(img_processed, gamma=0.7)
     
     img_rgb = cv2.cvtColor(img_processed, cv2.COLOR_BGR2RGB)
     img_hsv = cv2.cvtColor(img_processed, cv2.COLOR_BGR2HSV)
     img_gray = cv2.cvtColor(img_processed, cv2.COLOR_BGR2GRAY)
     img_h, img_w = img_processed.shape[:2]
+    
+    # 记录调试日志到本地文件
+    log_file = os.path.join(os.path.dirname(__file__), "debug_log.txt")
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"\n--- Analysis at {np.datetime64('now')} ---\n")
+        f.write(f"Is Warped: {is_warped}\n")
     
     # 2. SAM Predictor 初始化 (由 Generator 切换)
     print("正在进行深度学习分割 (Box Prompt 模式)...")
@@ -320,7 +346,51 @@ def process_sam_image(img, sam_model, result_save_path=None):
             
         name = default_names[idx] if idx < len(default_names) else f"区域 {idx + 1}"
         roi_area = (x2 - x1) * (y2 - y1)
+        is_rice_region = '米饭' in name
+
+        # === 【新增逻辑】 ROI 级别全局复杂度门槛 (针对空餐盘误报) ===
+        # 如果整个格子的平均复杂度都很低，那么它大概率是空盘反光，无需进行 SAM 分割
+        roi_gray = img_gray[y1:y2, x1:x2]
+        # 创建一个全 True 的临时 Mask 代表整个 ROI
+        full_roi_mask = np.ones((y2 - y1, x2 - x1), dtype=np.uint8)
+        global_roi_complexity = get_complexity_score(roi_gray, full_roi_mask)
         
+        # 米饭区的全局门槛显著拉高至 15.5 (针对强反光)
+        global_threshold = 15.5 if is_rice_region else 12.0
+        
+        # 将数据写入日志
+        with open(os.path.join(os.path.dirname(__file__), "debug_log.txt"), "a", encoding="utf-8") as f:
+            f.write(f"ROI:{idx} Name:{name} Complexity:{global_roi_complexity:.2f} Threshold:{global_threshold}\n")
+
+        if global_roi_complexity < global_threshold:
+            print(f"  [跳过 ROI:{idx}] 全局复杂度过低 ({global_roi_complexity:.1f})，判定为【空餐盘】")
+            results.append({
+                "name": name, "food_pixels": 0, "ratio": 0.0,
+                "roi": (x1, y1, x2-x1, y2-y1), "mask": np.zeros((y2 - y1, x2 - x1), dtype=np.uint8),
+                "grid_rect": (x1, y1, x2-x1, y2-y1)
+            })
+            continue
+
+        # === 【二次全局检验】利用饱和度特征 (仅限米饭区) ===
+        if is_rice_region:
+            roi_hsv = img_hsv[y1:y2, x1:x2]
+            avg_s = np.mean(roi_hsv[:, :, 1])
+            avg_v = np.mean(roi_hsv[:, :, 2])
+            
+            with open(os.path.join(os.path.dirname(__file__), "debug_log.txt"), "a", encoding="utf-8") as f:
+                f.write(f"  Rice Check: Saturation:{avg_s:.2f} Value:{avg_v:.2f}\n")
+
+            # 如果整个格子很亮但饱和度极低，这绝对不是米饭，而是金属底
+            # 略微放宽饱和度拦截到 14.0，因为不锈钢在特定角度会有环境反光
+            if avg_s < 14.0 and avg_v > 120:
+                print(f"  [跳过 ROI:{idx}] 物理特征不符 (饱和度={avg_s:.1f}，疑似金属底)，判定为【空餐盘】")
+                results.append({
+                    "name": name, "food_pixels": 0, "ratio": 0.0,
+                    "roi": (x1, y1, x2-x1, y2-y1), "mask": np.zeros((y2 - y1, x2 - x1), dtype=np.uint8),
+                    "grid_rect": (x1, y1, x2-x1, y2-y1)
+                })
+                continue
+
         # === 核心逻辑：使用 Box Prompt 分割 ===
         input_box = np.array([x1, y1, x2, y2])
         masks, scores, _ = predictor.predict(

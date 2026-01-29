@@ -230,6 +230,21 @@ class VisionService:
             x, y, w, h = box.xywh[0].cpu().numpy()
             box_area = w * h
             
+            # 针对不同类别应用动态置信度阈值
+            category_conf_threshold = conf_thres
+            normalized_name = cls_name.lower().strip()
+            
+            # 米饭和餐盘识别通常较稳，但米饭空盘反光易误报，需提高门槛
+            if normalized_name in ["noodle", "mantou"]:
+                category_conf_threshold = min(0.6, conf_thres + 0.1)
+            elif normalized_name == "rice":
+                category_conf_threshold = max(0.50, conf_thres + 0.05) # 提高米饭门槛
+            elif normalized_name == "tray":
+                category_conf_threshold = max(0.35, conf_thres - 0.05)
+
+            if box.conf[0].cpu().numpy() < category_conf_threshold:
+                continue
+
             # 过滤面积过大的误报
             if box_area / warped_area > 0.35:
                 continue
@@ -238,7 +253,7 @@ class VisionService:
             warped_detections.append({
                 'name': cls_name, 
                 'box': top_left_box, 
-                'is_rice': cls_name.lower() == 'rice'
+                'is_rice': normalized_name == 'rice'
             })
             confidences.append(float(box.conf[0].cpu().numpy()))
 
