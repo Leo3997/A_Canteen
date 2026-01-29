@@ -26,7 +26,7 @@ const LiveFeed: React.FC<LiveFeedProps> = ({ analysisResult, uploading, cooldown
         <img 
           src={analysisResult ? `${API_BASE}/static/results/${analysisResult.image_path}` : `${API_BASE}/api/video_feed`}
           alt="Vision Analysis" 
-          className="w-full h-full object-cover"
+          className="absolute inset-0 w-full h-full object-cover z-0"
         />
         {uploading && <div className="scan-line" />}
         {cooldown && !uploading && !analysisResult && (
